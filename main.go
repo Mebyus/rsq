@@ -18,6 +18,14 @@ const sequenceResetTemplate = `
 	end;
 `
 
+type tableMetadata struct {
+	schema                string
+	name                  string
+	sequencePkAttribute   string
+	columnPkAttribute     string
+	constraintPkAttribute string
+}
+
 const transactionTemplate = `
 do
 $$
@@ -70,17 +78,28 @@ func main() {
 		fmt.Println(err)
 		return
 	}
-	output := ""
+
+	dbMetadata := make([]tableMetadata, 0)
+	var tableMetadata tableMetadata
 	for _, record := range records[1:] {
 		if len(record) >= 4 && record[2] != "" && record[3] != "" {
-			output += fmt.Sprintf(sequenceResetTemplate,
-				record[0],
-				record[2],
-				record[3],
-				record[0],
-				record[1],
-			)
+			tableMetadata.schema = record[0]
+			tableMetadata.name = record[1]
+			tableMetadata.sequencePkAttribute = record[2]
+			tableMetadata.columnPkAttribute = record[3]
+			dbMetadata = append(dbMetadata, tableMetadata)
 		}
+	}
+
+	output := ""
+	for _, record := range dbMetadata {
+		output += fmt.Sprintf(sequenceResetTemplate,
+			record.schema,
+			record.sequencePkAttribute,
+			record.columnPkAttribute,
+			record.schema,
+			record.name,
+		)
 	}
 	output = fmt.Sprintf(transactionTemplate, output)
 	err = ioutil.WriteFile("reset_sequences.sql", []byte(output), 0662)
