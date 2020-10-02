@@ -1,0 +1,14 @@
+do
+$$
+begin
+{{range $index,$v:=.}}
+	begin
+		perform (select setval('{{$v.Schema}}.{{$v.SequencePkAttribute}}'::regclass, coalesce((select max({{$v.ColumnPkAttribute}}) from {{$v.Schema}}.{{$v.Name}}), 1)));
+	exception
+		when others then
+			null;
+	end;
+{{end}}
+end;
+$$
+	`

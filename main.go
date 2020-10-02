@@ -2,38 +2,23 @@ package main
 
 import (
 	"encoding/csv"
+	"flag"
 	"fmt"
+	"html/template"
 	"io/ioutil"
+	"log"
 	"os"
 )
 
 const version = "1.1"
 
-const sequenceResetTemplate = `
-	begin
-		perform (select setval('%s.%s'::regclass, coalesce((select max(%s) from %s.%s), 1)));
-	exception
-		when others then
-			null;
-	end;
-`
-
 type tableMetadata struct {
-	schema                string
-	name                  string
-	sequencePkAttribute   string
-	columnPkAttribute     string
-	constraintPkAttribute string
+	Schema                string
+	Name                  string
+	SequencePkAttribute   string
+	ColumnPkAttribute     string
+	ConstraintPkAttribute string
 }
-
-const transactionTemplate = `
-do
-$$
-begin
-%s
-end;
-$$
-`
 
 func csvReadAll(path string) (records [][]string, err error) {
 	f, err := os.Open(path)
@@ -51,21 +36,32 @@ func csvReadAll(path string) (records [][]string, err error) {
 	return
 }
 
-func inputFilePaths() (tables string) {
-	if len(os.Args) >= 2 {
-		tables = os.Args[1]
-	} else {
-		tables = "tables.csv"
+//чтение шаблона
+func templateRead(path string) (text []byte, err error) {
+
+	text, err = ioutil.ReadFile(path)
+	if err != nil {
+		err = fmt.Errorf("Чтение \"%s\" csv файла: %v", path, err)
+		return
 	}
 	return
 }
 
 func main() {
-	tablesFilepath := inputFilePaths()
-	if tablesFilepath == "version" {
-		fmt.Printf("rsq version: %s\n", version)
+	var templateFilepath, tablesFilepath string
+	flag.StringVar(&tablesFilepath, "table", "", "path to csv table")
+	flag.StringVar(&templateFilepath, "template", "", "path to template")
+	v := flag.Bool("v", false, "display version")
+	help := flag.Bool("help", false, "display help")
+	flag.Parse()
+
+	//если фраг указан в строке вызова
+	if *v {
+		fmt.Println(version)
 		return
-	} else if tablesFilepath == "help" {
+	}
+	if *help {
+		fmt.Println(version)
 		fmt.Println("usage:")
 		fmt.Println(">>> rsq [input filepath]")
 		fmt.Println("default input filepath = tables.csv")
@@ -75,37 +71,42 @@ func main() {
 	}
 	records, err := csvReadAll(tablesFilepath)
 	if err != nil {
-		fmt.Println(err)
+		log.Println(err)
 		return
 	}
 
+	//заполнение структуры dbMetadata
 	dbMetadata := make([]tableMetadata, 0)
 	var tableMetadata tableMetadata
-	for _, record := range records[1:] {
+	for _, record := range records {
 		if len(record) >= 4 && record[2] != "" && record[3] != "" {
-			tableMetadata.schema = record[0]
-			tableMetadata.name = record[1]
-			tableMetadata.sequencePkAttribute = record[2]
-			tableMetadata.columnPkAttribute = record[3]
+			tableMetadata.Schema = record[0]
+			tableMetadata.Name = record[1]
+			tableMetadata.SequencePkAttribute = record[2]
+			tableMetadata.ColumnPkAttribute = record[3]
 			dbMetadata = append(dbMetadata, tableMetadata)
 		}
 	}
 
-	output := ""
-	for _, record := range dbMetadata {
-		output += fmt.Sprintf(sequenceResetTemplate,
-			record.schema,
-			record.sequencePkAttribute,
-			record.columnPkAttribute,
-			record.schema,
-			record.name,
-		)
-	}
-	output = fmt.Sprintf(transactionTemplate, output)
-	err = ioutil.WriteFile("reset_sequences.sql", []byte(output), 0662)
+	//читаем шаблон из файла
+	templateText, err := templateRead(templateFilepath)
 	if err != nil {
-		fmt.Println(err)
+		log.Println(err)
 		return
 	}
+
+	template := template.New("")
+	template.Parse(string(templateText))
+
+	file, err := os.Create("./reset_sequences.sql")
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	defer file.Close()
+
+	//заполнение шаблона
+	err = template.Execute(file, dbMetadata[1:])
+
 	return
 }
